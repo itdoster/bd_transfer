@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.26730.12
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DatabaseTransfer", "DatabaseTransfer\DatabaseTransfer.csproj", "{523A81A2-8575-4A8C-A21B-0A9B4B7FD92B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DatabaseTransfer.Console", "DatabaseTransfer.Console\DatabaseTransfer.Console.csproj", "{0F17A9B2-3E6C-4F52-A650-8AF90217373D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{523A81A2-8575-4A8C-A21B-0A9B4B7FD92B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{523A81A2-8575-4A8C-A21B-0A9B4B7FD92B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{523A81A2-8575-4A8C-A21B-0A9B4B7FD92B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{523A81A2-8575-4A8C-A21B-0A9B4B7FD92B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0F17A9B2-3E6C-4F52-A650-8AF90217373D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0F17A9B2-3E6C-4F52-A650-8AF90217373D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0F17A9B2-3E6C-4F52-A650-8AF90217373D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0F17A9B2-3E6C-4F52-A650-8AF90217373D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {199AB135-A78A-4276-8121-B3EC5722E1A5}
+	EndGlobalSection
+EndGlobal
