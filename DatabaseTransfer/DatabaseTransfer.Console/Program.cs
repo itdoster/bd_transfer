@@ -9,7 +9,7 @@
             var postgreConnection = "Server=127.0.0.1;Port=5432;Database=test;User Id=postgres;Password = 1111;";
             var sqlFilePath = "script.sql";
             var transfer = new DatabaseMigrator(sqlConnection, postgreConnection, sqlFilePath);
-            transfer.MigrateSqlToPostgre(true);
+            transfer.MigrateSqlToPostgre(false);
             System.Console.WriteLine("Done");
             System.Console.ReadLine();
         }
