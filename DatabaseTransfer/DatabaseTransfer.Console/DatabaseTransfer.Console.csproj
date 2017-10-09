@@ -83,7 +83,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="sqlite3.exe">
+    <Content Include="script.sql">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

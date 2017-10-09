@@ -1,5 +1,6 @@
 ﻿namespace DatabaseTransfer
 {
+    using System.IO;
     using Npgsql;
     using System;
     using System.Collections.Generic;
@@ -7,37 +8,34 @@
     using System.Data.SQLite;
     using System.Linq;
 
-
     public class DatabaseMigrator
     {
-        private const string SelectAllTablesQuery = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY 1";
-        private const string SqlSchemaFile = "schema.sql";
+        private const int QuerycountPerTransaction = 3000;
+        private readonly string _scriptPath;
         private readonly string _sqlLiteConnectionString;
         private readonly string _postgreConnectionString;
-
-        public DatabaseMigrator(string sqliteConnection, string postgreSqlConnection)
+       
+        public DatabaseMigrator(string sqliteConnection, string postgreSqlConnection, string scriptPath)
         {
             this._sqlLiteConnectionString = sqliteConnection;
             this._postgreConnectionString = postgreSqlConnection;
+            this._scriptPath = scriptPath;
         }
 
         /// <summary>
         /// database synchronization
         /// </summary>
         /// <returns></returns>
-        public void MigrateSqlToPostgre()
+        public void MigrateSqlToPostgre(bool needToApplySchema)
         {
-            var schemaCreator = new SchemaCreator();
-            var schemaExportResult = schemaCreator.CreateSqlDatabaseSchemaScript(this._sqlLiteConnectionString, SqlSchemaFile);
-            if (schemaExportResult)
+            using (var conn = new NpgsqlConnection(this._postgreConnectionString))
             {
-                using (var conn = new NpgsqlConnection(this._postgreConnectionString))
+                conn.Open();
+                if (needToApplySchema)
                 {
-                    conn.Open();
                     this.CreateDatabaseFromSchema(conn);
-                    this.ImportDataFromSqlToPostgre(conn);
                 }
-
+                this.ImportDataFromSqlToPostgre(conn);
             }
         }
 
@@ -71,29 +69,55 @@
         /// <param name="table"></param>
         private void InsertInPostgreSqlTable(NpgsqlConnection postgreConnection, DataTable table)
         {
-            var transaction = postgreConnection.BeginTransaction();
-            try
+            var insertQueries = new List<string>();
+            var columnNames = table.Columns.Cast<DataColumn>().ToArray();
+            foreach (DataRow row in table.Rows)
             {
-                var insertQueries = new List<string>();
-                var columnNames = table.Columns.Cast<DataColumn>().ToArray();
-                foreach (DataRow row in table.Rows)
-                {
-                    var rowInsertQuery = columnNames.Select(column => $"'{row[column.ColumnName]}'").ToArray();
-                    insertQueries.Add($"INSERT INTO {table.TableName} VALUES ({string.Join(",", rowInsertQuery)});");
-                }
-                var query = $"ALTER TABLE {table} DISABLE TRIGGER ALL; {string.Join("", insertQueries.ToArray())}; ALTER TABLE {table} ENABLE TRIGGER ALL;";
-
-                using (var cmd = new NpgsqlCommand())
-                {
-                    cmd.Connection = postgreConnection;
-                    cmd.CommandText = query;
-                    cmd.ExecuteNonQuery();
-                }
-                transaction.Commit();
+                var rowInsertQuery = columnNames.Select(column => this.GetInsertValueByType(column.DataType, row[column.ColumnName]));
+                insertQueries.Add($"insert into {table.TableName} values ({string.Join(",", rowInsertQuery)});");
             }
-            catch (Exception ex)
+            //insert in database
+            for (var i = 0; i < insertQueries.Count; i += QuerycountPerTransaction)
             {
-                transaction.Rollback();
+                var queries = insertQueries.Skip(i).Take(QuerycountPerTransaction);
+                var transaction = postgreConnection.BeginTransaction();
+                try
+                {
+                    var query = $"alter table {table.TableName} disable trigger all; {string.Join("", queries.ToArray())}; alter table {table.TableName} enable trigger all;";
+                    using (var cmd = new NpgsqlCommand())
+                    {
+                        cmd.Connection = postgreConnection;
+                        cmd.CommandText = query;
+                        cmd.ExecuteNonQuery();
+                    }
+                    transaction.Commit();
+                }
+                catch (Exception ex)
+                {
+                    transaction.Rollback();
+                }
+            }
+        }
+
+        /// <summary>
+        /// get value to insert
+        /// </summary>
+        /// <param name="type"></param>
+        /// <param name="item"></param>
+        /// <returns></returns>
+        private string GetInsertValueByType(Type type, object item)
+        {
+            if (item is DBNull)
+            {
+                return "null";
+            }
+            switch (Type.GetTypeCode(type))
+            {
+                case TypeCode.String:
+                    var str = Convert.ToString(item).Replace("'", "''");
+                    return $@"'{str}'";
+                default:
+                    return $"{Convert.ChangeType(item, type)}";
             }
         }
 
@@ -105,13 +129,12 @@
         /// create tables scheme
         /// </summary>
         /// <param name="postgreConnection"></param>
-        public bool CreateDatabaseFromSchema(NpgsqlConnection postgreConnection)
+        private bool CreateDatabaseFromSchema(NpgsqlConnection postgreConnection)
         {
             var transaction = postgreConnection.BeginTransaction();
             try
             {
-                var sqlFormatter = new SqlFormatter();
-                var sqlSchema = sqlFormatter.GetSchemaSql(SqlSchemaFile);
+                var sqlSchema = File.ReadAllText(this._scriptPath);
                 using (var cmd = new NpgsqlCommand())
                 {
                     cmd.Connection = postgreConnection;
@@ -137,12 +160,12 @@
         /// </summary>
         /// <param name="connection"></param>
         /// <returns></returns>
-        public IEnumerable<string> GetTables(SQLiteConnection connection)
+        private IEnumerable<string> GetTables(SQLiteConnection connection)
         {
             var tables = new List<string>();
             try
             {
-                var table = this.GetDataTable(SelectAllTablesQuery, connection);
+                var table = this.GetDataTable(Queries.SelectAllTablesQuery, connection);
                 foreach (DataRow row in table.Rows)
                 {
                     tables.Add(row.ItemArray[0].ToString());
@@ -161,7 +184,7 @@
         /// <param name="sql"></param>
         /// <param name="connection"></param>
         /// <returns></returns>
-        public DataTable GetDataTable(string sql, SQLiteConnection connection)
+        private DataTable GetDataTable(string sql, SQLiteConnection connection)
         {
             try
             {
