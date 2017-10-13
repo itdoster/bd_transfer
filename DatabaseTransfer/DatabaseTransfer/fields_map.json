@@ -1,0 +1,30 @@
+﻿{
+  "main_id": {
+    "table": "bim_handle",
+    "field": "id"
+  },
+  "related_id": {
+    "table": "bim_handle",
+    "field": "id"
+  },
+  "bim_handle_id": {
+    "table": "bim_handle",
+    "field": "id"
+  },
+  "material_id": {
+    "table": "material",
+    "field": "id"
+  },
+  "raw_data_id": {
+    "table": "raw_data",
+    "field": "id"
+  },
+  "description_id": {
+    "table": "description",
+    "field": "id"
+  },
+  "bimdocument_id": {
+    "table": "bimdocument",
+    "field": "id"
+  }
+}

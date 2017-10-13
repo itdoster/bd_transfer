@@ -7,21 +7,38 @@
     using System.Data;
     using System.Data.SQLite;
     using System.Linq;
+    using Newtonsoft.Json;
+    using System.Text;
 
     public class DatabaseMigrator
     {
+        #region constanats
+
         private const int QuerycountPerTransaction = 3000;
+        private const string Id = "id";
+
+        #endregion constants
+
+        #region private fields
+
+        private List<string> TableNames { get; set; }
+        private Dictionary<string, Dictionary<long, long>> KeyMapper { get; set; } = new Dictionary<string, Dictionary<long, long>>();
+        private Dictionary<string, FieldMap> FieldsMapping { get; set; }
+        
         private readonly string _scriptPath;
         private readonly string _sqlLiteConnectionString;
         private readonly string _postgreConnectionString;
-       
-        public DatabaseMigrator(string sqliteConnection, string postgreSqlConnection, string scriptPath)
+
+        #endregion private fields
+
+        public DatabaseMigrator(string sqliteConnection, string postgreSqlConnection, string scriptPath, string mapJson)
         {
             this._sqlLiteConnectionString = sqliteConnection;
             this._postgreConnectionString = postgreSqlConnection;
             this._scriptPath = scriptPath;
+            this.FieldsMapping = JsonConvert.DeserializeObject<Dictionary<string, FieldMap>>(File.ReadAllText(mapJson));
         }
-
+        
         /// <summary>
         /// database synchronization
         /// </summary>
@@ -49,17 +66,105 @@
             using (var connection = new SQLiteConnection(this._sqlLiteConnectionString))
             {
                 connection.Open();
-                var tables = this.GetTables(connection);
+                this.TableNames = this.GetTables(connection).ToList();
                 var dataset = new DataSet();
-                foreach (var tableName in tables)
+                foreach (var tableName in this.TableNames)
                 {
                     dataset.Tables.Add(this.GetDataTable("select * from " + tableName, connection));
                 }
                 foreach (DataTable table in dataset.Tables)
                 {
-                    this.InsertInPostgreSqlTable(npgsqlConnection, table);
+                    if (this.IsIdFieldExist(table.Columns.Cast<DataColumn>().ToArray()))
+                    {
+                        this.SetKeyMapper(npgsqlConnection, table);
+                    }
+                }
+                foreach (DataTable table in dataset.Tables)
+                {
+                    this.InsertInPostgreSqlTable(npgsqlConnection, table, dataset);
                 }
             }
+        }
+        
+        /// <summary>
+        /// get last id from table
+        /// </summary>
+        /// <param name="postgreConnection"></param>
+        /// <param name="tableName"></param>
+        /// <returns></returns>
+        private long GetLastIdFromTable(NpgsqlConnection postgreConnection, string tableName)
+        {
+            using (var cmd = new NpgsqlCommand())
+            {
+                cmd.Connection = postgreConnection;
+                cmd.CommandText = $"select max(id) from {tableName}";
+                var result = cmd.ExecuteScalar();
+                return result is DBNull ? 0 : Convert.ToInt64(cmd.ExecuteScalar());
+            }
+        }
+
+        /// <summary>
+        /// check if id exist in table
+        /// </summary>
+        /// <param name="columnNames"></param>
+        /// <returns></returns>
+        private bool IsIdFieldExist(DataColumn[] columnNames)
+        {
+            return columnNames.Any(p => p.ColumnName == Id);
+        }
+
+        /// <summary>
+        /// map original pr to current database pk
+        /// </summary>
+        /// <param name="postgreConnection"></param>
+        /// <param name="table"></param>
+        private void SetKeyMapper(NpgsqlConnection postgreConnection, DataTable table)
+        {
+            var keysDictionary = new Dictionary<long, long>();
+            var startFromId = this.GetLastIdFromTable(postgreConnection, table.TableName) + 1;         
+                var ids = new List<long>();
+                foreach (DataRow row in table.Rows)
+                {
+                    keysDictionary.Add(Convert.ToInt64(row[Id]), startFromId);
+                    startFromId++;
+                }
+            
+            this.KeyMapper.Add(table.TableName, keysDictionary);
+         }
+
+        private List<string> GetInsertQueries(DataTable table)
+        {
+            var insertQueries = new List<string>();
+            var columnNames = table.Columns.Cast<DataColumn>().ToArray();
+            var columnsList = columnNames.Select(column => column.ColumnName).ToList();
+            var columns = string.Join(",", columnsList);
+            var isIdFieldExist = this.IsIdFieldExist(columnNames);           
+
+            foreach (DataRow row in table.Rows)
+            {
+                var rowInsertQuery = columnNames.Select(column => this.GetInsertValueByType(column.DataType, row[column.ColumnName])).ToList();
+
+                //change id for main tables
+                if (isIdFieldExist)
+                {
+                    var id = rowInsertQuery.FirstOrDefault();
+                    rowInsertQuery[0] = this.KeyMapper[table.TableName][Convert.ToInt64(id)].ToString();
+                }
+
+                foreach (var column in columnsList)
+                {
+                    if (this.FieldsMapping.ContainsKey(column))
+                    {
+                        var map = this.FieldsMapping[column];
+                        var indexOfField = columnsList.IndexOf(column);
+                        var foreignId = rowInsertQuery[indexOfField];
+                        rowInsertQuery[indexOfField] = this.KeyMapper[map.Table][Convert.ToInt64(foreignId)].ToString();
+                    }
+                }
+
+                insertQueries.Add($"insert into {table.TableName}({columns}) values ({string.Join(",", rowInsertQuery)});");
+            }
+            return insertQueries;
         }
 
         /// <summary>
@@ -67,15 +172,10 @@
         /// </summary>
         /// <param name="postgreConnection"></param>
         /// <param name="table"></param>
-        private void InsertInPostgreSqlTable(NpgsqlConnection postgreConnection, DataTable table)
+        private void InsertInPostgreSqlTable(NpgsqlConnection postgreConnection, DataTable table, DataSet dataSet)
         {
-            var insertQueries = new List<string>();
-            var columnNames = table.Columns.Cast<DataColumn>().ToArray();
-            foreach (DataRow row in table.Rows)
-            {
-                var rowInsertQuery = columnNames.Select(column => this.GetInsertValueByType(column.DataType, row[column.ColumnName]));
-                insertQueries.Add($"insert into {table.TableName} values ({string.Join(",", rowInsertQuery)});");
-            }
+            var insertQueries = this.GetInsertQueries(table);
+
             //insert in database
             for (var i = 0; i < insertQueries.Count; i += QuerycountPerTransaction)
             {
